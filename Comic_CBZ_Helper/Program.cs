@@ -8,6 +8,7 @@ namespace ConsoleApp1
 {
     class Program
     {
+        private static readonly object lockObject = new();
         static void Main(string[] args)
         {
             // 设置控制台的输出编码为UTF-8
@@ -77,15 +78,21 @@ namespace ConsoleApp1
                 // 获取所有漫画文件夹
                 comicFolders = new List<string>(Directory.GetDirectories(parentFolder));
             }
+            int totalFolders = comicFolders.Count;
+            int processedFolders = 0;
+            object consoleLock = new();
 
             // 设置初始日期
             DateTime currentDate = new(2020, 1, 1, 0, 0, 0);
             int count = 0;
             // 循环处理每个漫画文件夹
-            foreach (string comicFolder in comicFolders)
+            Parallel.ForEach(comicFolders, new ParallelOptions { MaxDegreeOfParallelism = 4 }, comicFolder =>
             {
-                // 输出开始处理提示信息
-                Console.WriteLine($"开始处理漫画文件夹 {comicFolder}...");
+                lock (consoleLock)
+                {
+                    // 输出开始处理提示信息
+                    Console.WriteLine($"开始处理漫画文件夹 {comicFolder}...");
+                }
 
                 // 确保漫画文件夹中包含图像文件
                 string[] imageFiles = Directory.GetFiles(comicFolder, "*.*", SearchOption.AllDirectories)
@@ -94,8 +101,11 @@ namespace ConsoleApp1
 
                 if (imageFiles.Length == 0)
                 {
-                    Console.WriteLine($"在漫画文件夹 {comicFolder} 中未找到任何图像文件 (.jpg or .png)。");
-                    continue; // 继续处理下一个漫画文件夹
+                    lock (consoleLock)
+                    {
+                        Console.WriteLine($"在漫画文件夹 {comicFolder} 中未找到任何图像文件 (.jpg or .png)。");
+                    }
+                    return; // 继续处理下一个漫画文件夹
                 }
 
                 // Sort the imageFiles using the NaturalSortComparer
@@ -107,12 +117,22 @@ namespace ConsoleApp1
                 // 检查 CBZ 文件是否已经存在，若存在则跳过当前漫画文件夹的处理
                 if (File.Exists(cbzFileName))
                 {
-                    Console.WriteLine($"CBZ 文件 {cbzFileName} 已存在，跳过。");
-                    continue;
+                    lock (consoleLock)
+                    {
+                        Console.WriteLine($"CBZ 文件 {cbzFileName} 已存在，跳过。");
+                    }
+                    return;
                 }
 
                 // 临时存储重命名后的文件路径
                 string tempFolder = Path.Combine(comicFolder, "temp");
+                // 检查 temp 文件夹是否存在，如果存在，则删除
+                if (Directory.Exists(tempFolder))
+                {
+                    Directory.Delete(tempFolder, true); // true 表示递归删除文件夹中的所有内容
+                }
+
+                // 创建新的 temp 文件夹
                 Directory.CreateDirectory(tempFolder);
 
                 // 重新编号并复制图像文件到临时文件夹
@@ -146,15 +166,40 @@ namespace ConsoleApp1
                 Directory.Delete(tempFolder, true);
 
                 // 增加日期
-                currentDate = currentDate.AddHours(7);
+                lock (lockObject)
+                {
+                    currentDate = currentDate.AddHours(7);
+                    count++;
+                }
 
-                Console.WriteLine($"漫画文件夹 {comicFolder} 转换完成。");
-                count++;
-            }
+                lock (consoleLock)
+                {
+                    Console.WriteLine($"漫画文件夹 {comicFolder} 转换完成。");
+                }
+
+                Interlocked.Increment(ref processedFolders);
+                lock (consoleLock)
+                {
+                    ShowProgress(processedFolders, totalFolders);
+                }
+            });
 
             PauseBeforeExit(count);
         }
-
+        private static void ShowProgress(int current, int total)
+        {
+            Console.CursorLeft = 0;
+            int width = 50; // 进度条宽度
+            int progress = (int)((current / (double)total) * width);
+            Console.Write("[");
+            Console.Write(new string('=', progress));
+            Console.Write(new string(' ', width - progress));
+            Console.Write($"] {current}/{total} 完成");
+            if (current == total)
+            {
+                Console.WriteLine("\n处理完成！");
+            }
+        }
         // 生成 ComicInfo.xml 内容
         private static string GenerateComicInfoXml(string comicFolder)
         {
