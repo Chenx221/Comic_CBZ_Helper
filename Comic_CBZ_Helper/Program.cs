@@ -11,8 +11,36 @@ namespace ConsoleApp1
         static void Main(string[] args)
         {
             // 设置控制台的输出编码为UTF-8
-            System.Text.Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             Console.OutputEncoding = Encoding.GetEncoding(936);
+
+            // 确认运行模式
+            Console.Write("请输入运行模式（0:append,1:init）：");
+            string? runMode = Console.ReadLine();
+
+            // 确保指定模式合法
+            if (runMode != "0" && runMode != "1")
+            {
+                Console.WriteLine("运行模式不合法。");
+                PauseBeforeExit(0);
+                return;
+            }
+
+            string listFilePath = string.Empty;
+            if (runMode == "1") // init模式
+            {
+                // 获取list.txt文件路径
+                Console.Write("请输入list.txt文件的完整路径：");
+                listFilePath = Console.ReadLine() ?? "";
+
+                // 确保list.txt文件存在
+                if (string.IsNullOrWhiteSpace(listFilePath) || !File.Exists(listFilePath))
+                {
+                    Console.WriteLine("list.txt 文件不存在。");
+                    PauseBeforeExit(0);
+                    return;
+                }
+            }
 
             // 获取上级文件夹路径
             Console.Write("请输入漫画所在的根路径：");
@@ -37,20 +65,18 @@ namespace ConsoleApp1
                 PauseBeforeExit(0);
                 return;
             }
-            // 读取txt文件中的文件夹顺序
-            string listFilePath = @"G:\list.txt";
-            if (!File.Exists(listFilePath))
-            {
-                Console.WriteLine("list.txt 文件不存在。");
-                PauseBeforeExit(0);
-                return;
-            }
-            List<string> folderOrder = [.. File.ReadAllLines(listFilePath)];
 
-            // 获取所有漫画文件夹并按顺序排序
-            List<string> comicFolders = [.. Directory.GetDirectories(parentFolder).OrderBy(folder => folderOrder.IndexOf(Path.GetFileName(folder)))];
-            // 获取所有漫画文件夹
-            //string[] comicFolders = Directory.GetDirectories(parentFolder);
+            List<string> comicFolders;
+            if (runMode == "1") // init模式
+            {
+                List<string> folderOrder = new(File.ReadAllLines(listFilePath));
+                comicFolders = [.. Directory.GetDirectories(parentFolder).OrderBy(folder => folderOrder.IndexOf(Path.GetFileName(folder)))];
+            }
+            else // append模式或其他
+            {
+                // 获取所有漫画文件夹
+                comicFolders = new List<string>(Directory.GetDirectories(parentFolder));
+            }
 
             // 设置初始日期
             DateTime currentDate = new(2020, 1, 1, 0, 0, 0);
@@ -109,11 +135,8 @@ namespace ConsoleApp1
                     {
                         archive.CreateEntryFromFile(imageFile, Path.GetFileName(imageFile));
                     }
+                    string comicInfoXmlContent = runMode == "1" ? GenerateComicInfoXml2(comicFolder, currentDate) : GenerateComicInfoXml(comicFolder);
 
-                    // 创建 ComicInfo.xml 并添加到 CBZ 文件
-                    //string comicInfoXmlContent = GenerateComicInfoXml(comicFolder);
-                    // init needed
-                    string comicInfoXmlContent = GenerateComicInfoXml2(comicFolder, currentDate);
                     ZipArchiveEntry comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
                     using StreamWriter writer = new(comicInfoEntry.Open());
                     writer.Write(comicInfoXmlContent);
@@ -135,7 +158,7 @@ namespace ConsoleApp1
         // 生成 ComicInfo.xml 内容
         private static string GenerateComicInfoXml(string comicFolder)
         {
-            string title = SecurityElement.Escape(comicFolder);
+            string title = SecurityElement.Escape(Path.GetFileName(comicFolder));
             int year = DateTime.Now.Year;
             int month = DateTime.Now.Month;
             int day = DateTime.Now.Day;
@@ -151,7 +174,7 @@ namespace ConsoleApp1
         // 生成 ComicInfo.xml 内容
         private static string GenerateComicInfoXml2(string comicFolder, DateTime date)
         {
-            string title = SecurityElement.Escape(comicFolder);
+            string title = SecurityElement.Escape(Path.GetFileName(comicFolder));
             int year = date.Year;
             int month = date.Month;
             int day = date.Day;
